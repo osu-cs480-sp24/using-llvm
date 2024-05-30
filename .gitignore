@@ -1,0 +1,4 @@
+*.o
+compiler
+test
+test_add_recursive
