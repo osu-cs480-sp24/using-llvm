@@ -34,9 +34,58 @@ LLVMValueRef build_binop(
     }
 }
 
+LLVMValueRef build_alloca(char* name, LLVMBuilderRef builder) {
+    LLVMBasicBlockRef insert_blk = LLVMGetInsertBlock(builder);
+    LLVMValueRef curr_fn = LLVMGetBasicBlockParent(insert_blk);
+    LLVMBasicBlockRef entry_blk = LLVMGetEntryBasicBlock(curr_fn);
+    LLVMValueRef first_instr = LLVMGetFirstInstruction(entry_blk);
+
+    LLVMBuilderRef alloca_builder = LLVMCreateBuilder();
+    if (LLVMIsAInstruction(first_instr)) {
+        LLVMPositionBuilderBefore(alloca_builder, first_instr);
+    } else {
+        LLVMPositionBuilderAtEnd(alloca_builder, entry_blk);
+    }
+    LLVMValueRef alloca = LLVMBuildAlloca(alloca_builder, LLVMFloatType(), name);
+
+    LLVMDisposeBuilder(alloca_builder);
+    return alloca;
+}
+
+LLVMValueRef build_assignment(
+    char* lhs,
+    LLVMValueRef rhs,
+    struct hash* symbols,
+    LLVMBuilderRef builder
+) {
+    if (!hash_contains(symbols, lhs)) {
+        LLVMValueRef alloca = build_alloca(lhs, builder);
+        hash_insert(symbols, lhs, alloca);
+    }
+    return LLVMBuildStore(builder, rhs, hash_get(symbols, lhs));
+}
+
+LLVMValueRef build_variable_val(
+    char* name,
+    struct hash* symbols,
+    LLVMBuilderRef builder)
+{
+    if (!hash_contains(symbols, name)) {
+        fprintf(stderr, "Unknown variable: %s\n", name);
+        return LLVMGetUndef(LLVMFloatType());
+    }
+    return LLVMBuildLoad2(
+        builder,
+        LLVMFloatType(),
+        hash_get(symbols, name),
+        name
+    );
+}
+
 int main() {
     LLVMModuleRef module = LLVMModuleCreateWithName("foo.code");
     LLVMBuilderRef builder = LLVMCreateBuilder();
+    struct hash* symbols = hash_create();
 
     LLVMTypeRef foo_type = LLVMFunctionType(
         LLVMFloatType(),
@@ -60,8 +109,14 @@ int main() {
         '+',
         builder
     );
+    LLVMValueRef assign1 = build_assignment(
+        "a",
+        expr2,
+        symbols,
+        builder
+    );
 
-    LLVMBuildRet(builder, expr2);
+    LLVMBuildRet(builder, build_variable_val("a", symbols, builder));
 
     LLVMVerifyModule(module, LLVMAbortProcessAction, NULL);
     char* out = LLVMPrintModuleToString(module);
